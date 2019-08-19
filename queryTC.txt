@@ -1,0 +1,228 @@
+QUERIES BY TRAVARO JONES (TC)
+
+/////////////
+CREATE DEFINER=`root`@`localhost` PROCEDURE `add_publisher`(IN pub_name VARCHAR(50), IN address VARCHAR(100), IN phone VARCHAR(10))
+BEGIN
+DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    	BEGIN   
+        ROLLBACK;         
+        SELECT 'SQLException encountered. Procedure cancelled.' AS msg;  
+END;   
+        
+START TRANSACTION;  
+        INSERT INTO tbl_publisher VALUES (floor(rand()*(1000-500)+500) ,pub_name, address, phone);     
+COMMIT; 
+END
+
+
+
+////////////
+CREATE DEFINER=`root`@`localhost` PROCEDURE `admin_show_all`()
+BEGIN
+    	SELECT concat(tbl_book.title, ' by ', tbl_author.authorName) 'book'
+    	FROM tbl_book
+    	JOIN tbl_book_authors ON tbl_book.bookId=tbl_book_authors.authorId
+    	JOIN tbl_author ON tbl_author.authorId=tbl_book_authors.authorId
+    	ORDER BY tbl_book.title;
+END
+
+
+
+///////////
+CREATE DEFINER=`root`@`localhost` PROCEDURE `books_at_branch`(IN branch_id INT(11))
+BEGIN
+    	SELECT concat(tbl_book.title, ' by ', tbl_author.authorName) 'book'
+    	FROM tbl_book
+    	JOIN tbl_book_authors ON tbl_book.bookId=tbl_book_authors.authorId
+    	JOIN tbl_author ON tbl_author.authorId=tbl_book_authors.authorId
+    	JOIN tbl_book_copies ON tbl_book_copies.bookId=tbl_book.bookId
+    	WHERE tbl_book_copies.noOfCopies > 0 AND tbl_book_copies.branchId=branch_id
+    	ORDER BY tbl_book.title;
+END
+
+
+
+//////////
+CREATE DEFINER=`root`@`localhost` PROCEDURE `books_from_loans`(IN branch_id INT, IN card_num INT)
+BEGIN
+    	SELECT tbl_book_loans.bookId
+    	FROM tbl_book_loans
+    	JOIN tbl_book ON tbl_book.bookId=tbl_book_loans.bookId
+    	WHERE tbl_book_loans.cardNo=card_num
+    	AND tbl_book_loans.branchId=branch_id
+    	ORDER BY tbl_book.title;
+END
+
+
+
+/////////
+CREATE DEFINER=`root`@`localhost` PROCEDURE `check_out`(IN book_id INT(11), IN branch_id INT(11), IN card_id INT(11))
+BEGIN
+
+	/*Handle any exceptions*/
+	DECLARE EXIT HANDLER FOR SQLEXCEPTION
+	BEGIN
+		ROLLBACK;
+		SELECT 'Error Occured. Procedure canceled..' AS 'Error';
+	END;
+	
+	-- Check book's availability
+	IF number_available(book_id, branch_id) > 0 THEN
+	START TRANSACTION;
+
+		-- Retrieve chosen book
+		UPDATE tbl_book_copies
+		SET tbl_book_copies.noOfCopies = number_available(book_id, branch_id) - 1
+		WHERE tbl_book_copies.bookId=book_id
+		AND 
+		tbl_book_copies.branchId=branch_id;
+
+		-- Then add entry into book_loans, date out should be today’s date, due date should be one week from today’s date.
+		INSERT INTO tbl_book_loans(bookId, branchId, cardNo, dateOut, dueDate)
+		VALUES(book_id, branch_id, card_id, CURDATE(), ADDDATE(CURDATE(), INTERVAL 7 DAY));
+        
+	COMMIT;
+		-- Return success message
+        SELECT concat('Success, ',tbl_borrower.name,'. ',tbl_book.title,' is due ',DATE_FORMAT(tbl_book_loans.dueDate, '%W, %d %M %Y'),'. See you then.' ) AS msg
+		FROM tbl_book_loans
+        JOIN tbl_book ON tbl_book.bookId=tbl_book_loans.bookId
+        JOIN tbl_borrower ON tbl_borrower.cardNo=tbl_book_loans.cardNo
+        WHERE tbl_book_loans.cardNo=card_id 
+        AND tbl_book_loans.bookId=book_id
+        AND tbl_book_loans.branchId=branch_id;
+	ELSE
+			SELECT 'NOT AVAILABLE' AS msg;
+	END IF;
+END
+
+
+
+//////////
+CREATE DEFINER=`root`@`localhost` PROCEDURE `edit_branch`(IN branch_id int,IN new_name VARCHAR(100),IN new_address VARCHAR(100))
+BEGIN
+	
+	/*Handle any exceptions*/
+	DECLARE EXIT HANDLER FOR SQLEXCEPTION
+	BEGIN
+		ROLLBACK;
+		SELECT 'Error Occured. Procedure canceled..' AS 'Error';
+	END;
+
+
+	START TRANSACTION;
+		/*Change branch's name if necessary*/
+		IF new_name != 'N/A'
+		THEN
+		CALL library.edit_branch_name(branch_id, new_name);
+		END IF;
+		
+		/*Change branch's address if necessary*/
+		IF new_address != 'N/A'
+		THEN
+		CALL library.edit_branch_address(branch_id, new_address);
+		END IF;
+    	COMMIT;
+    	SELECT 'Successfully Updated' AS msg;
+END
+
+
+
+///////////
+CREATE DEFINER=`root`@`localhost` PROCEDURE `edit_branch_address`(IN branch_id int, IN new_address VARCHAR(75))
+BEGIN
+	UPDATE tbl_library_branch
+	SET tbl_library_branch.branchAddress = new_address
+	WHERE tbl_library_branch.branchId = branch_id;
+END
+
+
+
+///////////
+CREATE DEFINER=`root`@`localhost` PROCEDURE `edit_branch_name`(IN branch_id int, IN new_name VARCHAR(75))
+BEGIN
+	UPDATE tbl_library_branch
+	SET tbl_library_branch.branchName = new_name
+	WHERE tbl_library_branch.branchId = branch_id;
+END
+
+
+
+//////////
+CREATE DEFINER=`root`@`localhost` PROCEDURE `ids_at_branch`(IN branch_id INT(11))
+BEGIN
+    	SELECT tbl_book.bookId 'id'
+    	FROM tbl_book
+    	JOIN tbl_book_authors ON tbl_book.bookId=tbl_book_authors.authorId
+    	JOIN tbl_author ON tbl_author.authorId=tbl_book_authors.authorId
+    	JOIN tbl_book_copies ON tbl_book_copies.bookId=tbl_book.bookId
+    	WHERE tbl_book_copies.noOfCopies > 0 AND tbl_book_copies.branchId=branch_id
+    	ORDER BY tbl_book.title;
+END
+
+
+
+////////
+CREATE DEFINER=`root`@`localhost` PROCEDURE `return_shell`(IN book_id INT, IN branch_id INT, IN card_num INT)
+BEGIN
+	/*Used to call Chris's return_book()*/
+	/*Will make bash script a little more manageable*/
+	SET @penalty := 0.0;
+    	SET @exit_code := 0;
+    	SET @msg := '';
+    
+    	    	
+	CALL return_book(book_id, branch_id, card_num, CURDATE(), @penalty, @exit_code, @msg);
+    	IF @exit_code = 1 THEN
+		SELECT @msg AS msg;
+	ELSEIF @penalty > 0.0 THEN
+		SELECT concat('Unfortunately, you owe ', @penalty, ' for this late return..') AS msg;
+	ELSE
+        SELECT 'Thank you.. Let\'s do this again sometime.';
+	END IF;
+END
+
+
+
+/////////
+CREATE DEFINER=`root`@`localhost` PROCEDURE `show_loans`(IN branch_id INT, IN card_num INT)
+BEGIN
+	/*Shows user loans at the selected branch*/
+	SELECT @msg := concat(tbl_book.title, ' is due ', tbl_book_loans.dueDate)
+    	FROM tbl_book_loans
+    	JOIN tbl_book ON tbl_book.bookId=tbl_book_loans.bookId
+    	WHERE tbl_book_loans.cardNo=card_num
+    	AND tbl_book_loans.branchId=branch_id
+    	AND tbl_book_loans.returnedDate IS NULL
+    	ORDER BY tbl_book.title;    
+END
+
+
+
+/////////
+CREATE DEFINER=`root`@`localhost` PROCEDURE `update_copies`(in copy_num int, in branch_id int, in book_id int)
+BEGIN
+	declare exit handler for sqlexception
+	begin
+		rollback;
+		select @error := concat('Failed to update book ', book_id, ' in branch ', branch_id) AS msg;
+	end;
+    
+    	Start Transaction;
+    	update tbl_book_copies 
+		set tbl_book_copies.noOfCopies = copy_num 
+		where bookId = book_id and branchId = branch_id;
+		select @msg := concat('Updated ', book_id, ' to ', copy_num, ' in branch ', branch_id, '!') AS msg;
+    	Commit;
+END
+
+
+
+/////////
+CREATE DEFINER=`root`@`localhost` PROCEDURE `validate_user`(in card_num int)
+BEGIN
+	IF EXISTS(SELECT * FROM tbl_borrower WHERE tbl_borrower.cardNo=card_num) THEN
+	SELECT 'PROCEED';
+    	ELSE
+	SELECT 'NO MATCHING CARD HOLDER';
+    	END IF;
+END

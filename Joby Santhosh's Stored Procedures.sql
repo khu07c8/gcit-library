@@ -104,8 +104,8 @@ DECLARE EXIT HANDLER FOR SQLEXCEPTION
     WHERE bookId1 = bookID AND cardNo1 = cardNo;
     
     SET result = (SELECT datediff(returnDate1,(SELECT dueDate
-												FROM tbl_book_loans 
-												WHERE cardNo = cardNo1 AND bookId = bookId1)));
+						FROM tbl_book_loans 
+						WHERE cardNo = cardNo1 AND bookId = bookId1)));
     IF (result>0) THEN
 			Select concat("Your penalty is :", result*0.25, '$');
 	else 
